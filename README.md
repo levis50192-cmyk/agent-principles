@@ -28,6 +28,10 @@ Every entry is three lines:
 No entry is included unless it came from a real incident. Invented principles
 have no weight, and they dilute the file into yet another best-practices list.
 
+Examples are deliberately drawn from **different domains** — scheduled jobs,
+LLM output handling, data pipelines, media production, shell execution — because
+these failures aren't about a domain. They're about how you work.
+
 ## What's in it
 
 | | |
@@ -81,6 +85,9 @@ MIT.
 
 **沒有真實案例的條目不收。** 想像出來的原則沒有重量，
 而且會把這份文件稀釋成又一個「最佳實踐清單」。
+
+案例刻意取自**不同領域** —— 排程維運、LLM 輸出處理、資料管線、
+媒體產製、命令列執行 —— 因為這些失敗跟領域無關，跟**工作方式**有關。
 
 ## 幾條例子
 
