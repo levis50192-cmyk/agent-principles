@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VideoTrans 影片翻譯上字幕</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--fg:#1c2024;--mute:#667085;--line:#e3e6ea;--acc:#2f6fed;--ok:#1a8f4c;--err:#d33}
+@media (prefers-color-scheme:dark){:root{--bg:#14161a;--card:#1d2026;--fg:#e8eaed;--mute:#98a2b3;--line:#2d323a;--acc:#6b9bff;--ok:#4cc58a;--err:#ff7a7a}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,"Noto Sans TC",sans-serif}
+main{max-width:1100px;margin:0 auto;padding:20px 16px 80px}h1{font-size:22px;margin:8px 0 16px}h2{font-size:16px;margin:0 0 12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+label{display:block;font-size:13px;color:var(--mute);margin:10px 0 4px}
+input[type=text],select,textarea{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+button{padding:8px 16px;border:0;border-radius:8px;background:var(--acc);color:#fff;font:inherit;cursor:pointer}
+button.ghost{background:transparent;color:var(--acc);border:1px solid var(--line)}button:disabled{opacity:.5;cursor:default}
+.langs{display:flex;flex-wrap:wrap;gap:8px}.langs label{display:flex;align-items:center;gap:6px;margin:0;padding:6px 10px;border:1px solid var(--line);border-radius:8px;color:var(--fg);cursor:pointer}
+.row{display:flex;flex-wrap:wrap;gap:16px;align-items:center}.row>*{flex:0 0 auto}.grow{flex:1 1 220px!important}
+.opts label{display:inline-flex;gap:6px;align-items:center;margin:8px 16px 0 0;color:var(--fg)}
+.job{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:8px 0;border-top:1px solid var(--line);cursor:pointer}.job:first-of-type{border-top:0}
+.tag{font-size:12px;padding:2px 8px;border-radius:99px;border:1px solid var(--line);color:var(--mute)}.tag.done,.tag.review{color:var(--ok)}.tag.error{color:var(--err)}
+.bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin:8px 0}.bar i{display:block;height:100%;background:var(--acc);transition:width .4s}
+table{width:100%;border-collapse:collapse}th,td{padding:4px;vertical-align:top;border-top:1px solid var(--line);text-align:left}th{font-size:12px;color:var(--mute);font-weight:500}
+td textarea{min-height:44px;resize:vertical}td input.t{width:74px;padding:6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg)}
+.scroll{max-height:520px;overflow:auto}video{width:100%;max-height:380px;background:#000;border-radius:8px}
+.err{color:var(--err)}.mute{color:var(--mute);font-size:13px}a{color:var(--acc)}
+</style>
+</head>
+<body><main>
+<h1>VideoTrans <span class="mute">影片翻譯 · 重新上字幕 · AI 配音</span></h1>
+<div id="warn" class="card err" hidden>伺服器尚未設定 ANTHROPIC_API_KEY,無法翻譯。</div>
+
+<section class="card"><h2>1. 新增任務</h2>
+<form id="form">
+  <label>影片檔 (mp4 / mov / mkv / webm)</label><input type="file" id="file" accept="video/*" required>
+  <label>目標語言(可多選)</label><div class="langs" id="targets"></div>
+  <div class="row"><div class="grow"><label>原始語言</label><select id="src"><option value="">自動偵測</option></select></div>
+  <div class="grow"><label>影片背景/專有名詞(選填,提升翻譯準確度)</label><input type="text" id="ctx" placeholder="例:美食教學頻道,主廚名 Minh,菜名 Phở bò"></div></div>
+  <div class="opts"><label><input type="checkbox" id="burn" checked>燒錄字幕到影片</label>
+  <label><input type="checkbox" id="dub" checked>產生 AI 配音</label>
+  <label><input type="checkbox" id="bi">雙語字幕(附原文)</label>
+  <label><input type="checkbox" id="auto">翻譯完直接輸出(跳過校對)</label>
+  <label>原音量 <input type="range" id="vol" min="0" max="0.6" step="0.02" value="0.12"></label></div>
+  <p><button id="go">開始處理</button> <span id="upmsg" class="mute"></span></p>
+</form></section>
+
+<section class="card"><h2>任務列表</h2><div id="jobs" class="mute">載入中…</div></section>
+<section id="detail" hidden></section>
+</main>
+<script>
+const $=s=>document.querySelector(s);let meta,cur=null,timer=null,dirty=false;
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const api=async(u,o)=>{const r=await fetch(u,o);if(!r.ok){let m=r.statusText;try{m=(await r.json()).detail||m}catch{}throw new Error(m)}return r.json()};
+const fmt=t=>{const m=Math.floor(t/60);return m+':'+(t%60).toFixed(1).padStart(4,'0')};
+const parse=s=>{const p=String(s).split(':');return p.length==2?(+p[0])*60+(+p[1]):+s};
+
+(async()=>{meta=await api('/api/meta');$('#warn').hidden=meta.claude_key;
+ for(const [k,v] of Object.entries(meta.langs)){
+  $('#targets').insertAdjacentHTML('beforeend',`<label><input type="checkbox" value="${k}" ${['vi','th'].includes(k)?'checked':''}>${esc(v.label)}</label>`);
+  $('#src').insertAdjacentHTML('beforeend',`<option value="${k}">${esc(v.label)}</option>`)}
+ refresh();setInterval(refresh,3000)})();
+
+$('#form').onsubmit=async e=>{e.preventDefault();
+ const t=[...document.querySelectorAll('#targets input:checked')].map(i=>i.value);if(!t.length)return alert('請至少選一個目標語言');
+ const fd=new FormData();fd.append('file',$('#file').files[0]);fd.append('targets',t);fd.append('source_lang',$('#src').value);
+ fd.append('context',$('#ctx').value);fd.append('burn',$('#burn').checked);fd.append('dub',$('#dub').checked);
+ fd.append('bilingual',$('#bi').checked);fd.append('auto_render',$('#auto').checked);fd.append('original_volume',$('#vol').value);
+ $('#go').disabled=true;$('#upmsg').textContent='上傳中…';
+ try{const {id}=await api('/api/jobs',{method:'POST',body:fd});$('#upmsg').textContent='';$('#form').reset();open_(id)}
+ catch(err){$('#upmsg').innerHTML='<span class="err">'+esc(err.message)+'</span>'}
+ $('#go').disabled=false};
+
+const STATUS={uploading:'上傳中',queued:'排隊中',transcribing:'語音辨識',translating:'翻譯中',review:'待校對',rendering:'輸出中',done:'完成',error:'失敗'};
+async function refresh(){
+ const list=await api('/api/jobs');
+ $('#jobs').innerHTML=list.length?list.map(j=>`<div class="job" data-id="${j.id}"><span>${esc(j.filename)} <span class="mute">→ ${j.targets.join(', ')}</span></span><span class="tag ${j.status}">${STATUS[j.status]||j.status}</span></div>`).join(''):'尚無任務';
+ document.querySelectorAll('.job').forEach(el=>el.onclick=()=>open_(el.dataset.id));
+ if(cur&&!dirty)load(cur)}
+function open_(id){cur=id;dirty=false;load(id,true)}
+
+async function load(id,force){
+ const j=await api('/api/jobs/'+id);if(id!==cur)return;
+ const d=$('#detail');d.hidden=false;
+ const busy=['uploading','queued','transcribing','translating','rendering'].includes(j.status);
+ if(!force&&dirty)return;
+ if(!force&&d.dataset.sig===j.status+j.message+JSON.stringify(j.renders)&&!busy)return;
+ d.dataset.sig=j.status+j.message+JSON.stringify(j.renders);
+ let h=`<div class="card"><div class="row"><h2 class="grow">${esc(j.filename)}</h2><span class="tag ${j.status}">${STATUS[j.status]||j.status}</span>
+  <button class="ghost" id="del">刪除</button></div>
+  ${busy?`<div class="bar"><i style="width:${Math.round((j.progress||0)*100)}%"></i></div>`:''}
+  <div class="${j.status=='error'?'err':'mute'}">${esc(j.message)}</div></div>`;
+ if(j.segments.length&&!busy||j.status=='rendering'||j.status=='done'||j.status=='review'){h+=review(j)}
+ d.innerHTML=h;
+ $('#del').onclick=async()=>{if(confirm('刪除此任務與所有檔案?')){await api('/api/jobs/'+id,{method:'DELETE'});cur=null;d.hidden=true;refresh()}};
+ if($('#save'))wire(j)}
+
+function review(j){
+ const langs=j.targets;
+ let h=`<div class="card"><h2>預覽</h2>`;
+ const outs=langs.filter(l=>j.renders[l]?.status=='done'&&j.renders[l].files.video);
+ const play=outs.length?`/api/jobs/${j.id}/files/${j.renders[outs[0]].files.video}`:`/api/jobs/${j.id}/files/${j.filename?'source.'+j.filename.split('.').pop().toLowerCase():''}`;
+ h+=`<video id="vid" controls src="${play}">${langs.filter(l=>j.renders[l]?.files).map((l,i)=>`<track kind="subtitles" srclang="${l}" label="${esc(meta.langs[l].label)}" src="/api/jobs/${j.id}/files/${j.renders[l].files.vtt}">`).join('')}</video></div>`;
+ h+=`<div class="card"><h2>2. 校對字幕</h2><p class="mute">偵測原文語言:${esc(j.detected_lang||'?')}。可直接修改時間與文字,改完按「儲存」。</p><div class="scroll"><table><thead><tr><th>#</th><th>開始</th><th>結束</th><th>原文</th>${langs.map(l=>`<th>${esc(meta.langs[l].label)}</th>`).join('')}</tr></thead><tbody>`;
+ j.segments.forEach((s,i)=>{h+=`<tr data-i="${i}"><td>${i+1}</td><td><input class="t st" value="${fmt(s.start)}"></td><td><input class="t en" value="${fmt(s.end)}"></td>
+  <td><textarea class="tx">${esc(s.text)}</textarea></td>${langs.map(l=>`<td><textarea data-l="${l}" class="tr">${esc(s.tr[l])}</textarea></td>`).join('')}</tr>`});
+ h+=`</tbody></table></div><p><button id="save">儲存修改</button> <span id="smsg" class="mute"></span></p></div>`;
+ h+=`<div class="card"><h2>3. 輸出</h2><div class="opts">
+  <label><input type="checkbox" id="rb" ${j.options.burn?'checked':''}>燒錄字幕</label><label><input type="checkbox" id="rd" ${j.options.dub?'checked':''}>AI 配音</label><label><input type="checkbox" id="rbi" ${j.options.bilingual?'checked':''}>雙語</label></div>
+  <div class="row">${langs.map(l=>`<div><label>${esc(meta.langs[l].label)} 配音聲線</label><select data-v="${l}">${meta.langs[l].voices.map(v=>`<option ${j.options.voices?.[l]==v?'selected':''}>${v}</option>`).join('')}</select></div>`).join('')}</div>
+  <p><button id="render" ${['rendering','queued'].includes(j.status)?'disabled':''}>開始輸出</button></p>
+  ${langs.map(l=>{const r=j.renders[l];if(!r)return'';return`<div class="job" style="cursor:default"><span>${esc(meta.langs[l].label)}</span><span>${r.status=='done'?Object.entries(r.files).map(([k,f])=>`<a href="/api/jobs/${j.id}/files/${f}?download=true">${k}</a>`).join(' · '):'<span class="mute">處理中…</span>'}</span></div>`}).join('')}</div>`;
+ return h}
+
+function collect(j){return [...document.querySelectorAll('tbody tr')].map(tr=>{const i=+tr.dataset.i,s=j.segments[i],tr_={};
+  tr.querySelectorAll('.tr').forEach(t=>tr_[t.dataset.l]=t.value);
+  return {id:s.id,start:parse(tr.querySelector('.st').value),end:parse(tr.querySelector('.en').value),text:tr.querySelector('.tx').value,tr:tr_}})}
+function wire(j){
+ document.querySelectorAll('td input,td textarea').forEach(el=>el.oninput=()=>dirty=true);
+ $('#save').onclick=async()=>{try{await api(`/api/jobs/${j.id}/segments`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(collect(j))});dirty=false;$('#smsg').textContent='已儲存'}catch(e){$('#smsg').innerHTML='<span class="err">'+esc(e.message)+'</span>'}};
+ $('#render').onclick=async()=>{$('#save').click();await new Promise(r=>setTimeout(r,400));const voices={};document.querySelectorAll('[data-v]').forEach(s=>voices[s.dataset.v]=s.value);
+  try{await api(`/api/jobs/${j.id}/render`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({langs:j.targets,dub:$('#rd').checked,burn:$('#rb').checked,bilingual:$('#rbi').checked,voices,original_volume:j.options.original_volume})});dirty=false;load(j.id,true)}catch(e){alert(e.message)}}}
+</script>
+</body></html>

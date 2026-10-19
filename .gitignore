@@ -1,1 +1,7 @@
 .DS_Store
+videotrans/data/
+videotrans/fonts/
+videotrans/.venv/
+__pycache__/
+.pytest_cache/
+.env
