@@ -1,0 +1,28 @@
+{
+  "name": "domino-big",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "studio": "remotion studio src/index.ts",
+    "layout": "node layout.mjs && node cam.mjs && cp dominoes.json cam.json src/",
+    "render": "remotion render src/index.ts Big out.mp4 --codec=h264 --crf=18 --image-format=jpeg --jpeg-quality=94"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@fontsource/noto-sans-tc": "^5.3.1",
+    "@react-three/fiber": "^8.15.19",
+    "@remotion/cli": "^4.0.300",
+    "@remotion/three": "^4.0.300",
+    "@types/react": "^18.3.31",
+    "@types/three": "^0.160.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "remotion": "^4.0.300",
+    "three": "^0.160.0",
+    "typescript": "5.6"
+  },
+  "private": true
+}
